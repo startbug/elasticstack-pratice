@@ -2,14 +2,14 @@ package com.ggs.domain;
 
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.query_dsl.QueryBuilders;
-import co.elastic.clients.elasticsearch._types.query_dsl.TermQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.*;
 import co.elastic.clients.elasticsearch.core.IndexRequest;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch.core.search.TotalHitsRelation;
+import co.elastic.clients.json.JsonData;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import org.apache.http.HttpHost;
@@ -17,14 +17,12 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.ssl.SSLContexts;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 
 import javax.net.ssl.SSLContext;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -38,7 +36,6 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.util.List;
-import java.util.function.Function;
 
 /**
  * @Author lianghaohui
@@ -149,6 +146,88 @@ public class TestDemo {
             Product pd2 = hit.source();
             System.out.println("Found product " + pd2.getId() + ", score " + hit.score());
         }
+
+        SearchResponse<Product> search1 = client.search(s -> s
+                        .index("products")
+                        .query(q -> q
+                                .term(t -> t
+                                        .field("name")
+                                        .value(v -> v.stringValue("bag"))
+                                )),
+                Product.class
+        );
+
+        for (Hit<Product> hit : search1.hits().hits()) {
+            Product pd = hit.source();
+            System.out.println(pd);
+        }
+
+        TermQuery termQuery = TermQuery.of(t -> t
+                .field("name")
+                .value(v -> v.stringValue("bag")
+                )
+        );
+
+        SearchResponse<Product> search2 = client.search(s -> s
+                .index("products")
+                .query(termQuery._toQuery()
+                ), Product.class);
+
+        for (Hit<Product> hit : search2.hits().hits()) {
+            Product pd = hit.source();
+            System.out.println(pd);
+        }
+
+        // Search by product name
+        Query byName = MatchQuery.of(m -> m
+                .field("name")
+                .query("bag")
+        )._toQuery();
+
+        // Search by max price
+        Query byMaxPrice = RangeQuery.of(r -> r
+                .field("price")
+                .gte(JsonData.of(10))
+        )._toQuery();
+
+        // Combine name and price queries to search to product index
+        SearchResponse<Product> response = client.search(s -> s
+                        .index("products")
+                        .query(q -> q
+                                .bool(b -> b
+                                        .must(byName)
+                                        .should(byMaxPrice)
+                                )
+                        ),
+                Product.class
+        );
+
+        List<Hit<Product>> hits = response.hits().hits();
+        for (Hit<Product> hit : hits) {
+            Product product2 = hit.source();
+            System.out.println("Found product " + product2.getId() + ", score " + hit.score());
+        }
+
+        // Creating aggregations
+        SearchResponse<Void> search3 = client.search(b -> b
+                        .index("products")
+                        .size(0)
+                        .aggregations("price-histo",
+                                a -> a.histogram(h -> h
+                                        .field("price")
+                                        .interval(20.0)
+                                )
+                        ),
+                Void.class);
+
+        long firstBucketCount = search3.aggregations()
+                .get("price-histo")
+                .histogram()
+                .buckets().array()
+                .get(0)
+                .docCount();
+
+        System.out.println("doc count: " + firstBucketCount);
 
     }
 
